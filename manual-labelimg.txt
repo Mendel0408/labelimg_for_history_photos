@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>历史图像特征点标注工具</title>
+    <style>
+        .container {
+            display: flex;
+            padding: 20px;
+        }
+        .canvas-container {
+            position: relative;
+            border: 1px solid #ccc;
+            margin-right: 20px;
+        }
+        canvas {
+            cursor: crosshair;
+        }
+        .control-panel {
+            width: 300px;
+            padding: 10px;
+            background: #f5f5f5;
+        }
+        .point-list {
+            height: 300px;
+            overflow-y: auto;
+            margin-top: 10px;
+            border: 1px solid #ddd;
+        }
+        .point-item {
+            padding: 5px;
+            margin: 2px;
+            background: #fff;
+        }
+        .coordinates {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="canvas-container">
+            <canvas id="imageCanvas"></canvas>
+            <div class="coordinates" id="coordinates"></div>
+        </div>
+        <div class="control-panel">
+            <input type="file" id="imageLoader" accept="image/*">
+            <div>
+                <label>缩放: </label>
+                <input type="range" id="zoom" min="0.1" max="3" step="0.1" value="1">
+            </div>
+            <div>
+                <input type="text" id="pointName" placeholder="特征点名称">
+                <input type="text" id="pointSymbol" placeholder="特征点符号 (如A1)">
+            </div>
+            <button onclick="exportCSV()">导出CSV</button>
+            <div class="point-list" id="pointList"></div>
+        </div>
+    </div>
+
+<script>
+const canvas = document.getElementById('imageCanvas');
+const ctx = canvas.getContext('2d');
+const coordsDisplay = document.getElementById('coordinates');
+let points = [];
+let image = null;
+let scale = 1;
+let offsetX = 0;
+let offsetY = 0;
+let isDragging = false;
+let lastX = 0;
+let lastY = 0;
+
+// 图像加载
+document.getElementById('imageLoader').onchange = function(e) {
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        const img = new Image();
+        img.onload = function() {
+            image = img;
+            canvas.width = img.width;
+            canvas.height = img.height;
+            redraw();
+        }
+        img.src = event.target.result;
+    }
+    reader.readAsDataURL(e.target.files[0]);
+};
+
+// 缩放控制
+document.getElementById('zoom').oninput = function(e) {
+    scale = parseFloat(e.target.value);
+    redraw();
+};
+
+// 鼠标事件处理
+canvas.onmousedown = function(e) {
+    if (e.button === 2) { // 右键拖动
+        isDragging = true;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        return;
+    }
+    
+    // 左键添加点
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left - offsetX) / scale;
+    const y = (e.clientY - rect.top - offsetY) / scale;
+    
+    const name = document.getElementById('pointName').value || 'Point ' + (points.length + 1);
+    const symbol = document.getElementById('pointSymbol').value || 'A' + (points.length + 1);
+    
+    points.push({
+        x: Math.round(x),
+        y: Math.round(y),
+        name: name,
+        symbol: symbol
+    });
+    
+    updatePointList();
+    redraw();
+};
+
+canvas.oncontextmenu = function(e) {
+    e.preventDefault();
+};
+
+canvas.onmousemove = function(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.round((e.clientX - rect.left - offsetX) / scale);
+    const y = Math.round((e.clientY - rect.top - offsetY) / scale);
+    coordsDisplay.textContent = `X: ${x}, Y: ${y}`;
+    
+    if (isDragging) {
+        offsetX += e.clientX - lastX;
+        offsetY += e.clientY - lastY;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        redraw();
+    }
+};
+
+canvas.onmouseup = function() {
+    isDragging = false;
+};
+
+// 重绘画布
+function redraw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    if (image) {
+        ctx.save();
+        ctx.translate(offsetX, offsetY);
+        ctx.scale(scale, scale);
+        ctx.drawImage(image, 0, 0);
+        
+        // 绘制标记点
+        points.forEach((point, index) => {
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, 3/scale, 0, 2 * Math.PI);
+            ctx.fillStyle = 'red';
+            ctx.fill();
+            
+            ctx.font = `${12/scale}px Arial`;
+            ctx.fillStyle = 'yellow';
+            ctx.fillText(point.symbol, point.x + 5/scale, point.y + 5/scale);
+        });
+        
+        ctx.restore();
+    }
+}
+
+// 更新点列表显示
+function updatePointList() {
+    const list = document.getElementById('pointList');
+    list.innerHTML = points.map((point, index) => `
+        <div class="point-item">
+            ${point.symbol} - ${point.name} (${point.x}, ${point.y})
+            <button onclick="removePoint(${index})">删除</button>
+        </div>
+    `).join('');
+}
+
+// 删除点
+function removePoint(index) {
+    points.splice(index, 1);
+    updatePointList();
+    redraw();
+}
+
+// 导出CSV
+function exportCSV() {
+    const csvContent = "data:text/csv;charset=utf-8," 
+        + "ID,Name,Symbol,Pixel_x,Pixel_y\n"
+        + points.map((point, index) => 
+            `${index + 1},${point.name},${point.symbol},${point.x},${point.y}`
+        ).join("\n");
+    
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "feature_points.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+</script>
+</body>
+</html>
