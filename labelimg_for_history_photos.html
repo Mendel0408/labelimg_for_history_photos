@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>labelimg_for_history_photos</title>
+    <title>Labelimg for history photos</title>
     <style>
         body {
             margin: 0;
@@ -53,14 +53,14 @@
             width: 60px;
             text-align: right;
         }
-        .point-list {
+        .point-list, .image-list {
             flex: 1;
             overflow-y: auto;
             border: 1px solid #ddd;
             background: white;
             border-radius: 4px;
         }
-        .point-item {
+        .point-item, .image-item {
             padding: 10px;
             margin: 5px;
             background: #f9f9f9;
@@ -80,6 +80,15 @@
             color: #666;
             margin-top: 3px;
         }
+        .file-upload {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .file-status {
+            font-size: 0.9em;
+            color: #666;
+        }
     </style>
 </head>
 <body>
@@ -89,8 +98,18 @@
             <div class="coordinates" id="coordinates"></div>
         </div>
         <div class="control-panel">
-            <input type="file" id="imageLoader" accept="image/*" class="input-field">
+            <div class="file-upload">
+                <label for="imageLoader" class="input-field" style="cursor: pointer; width: auto;">上传历史照片</label>
+                <input type="file" id="imageLoader" accept="image/*" style="display: none;">
+                <span id="fileStatus" class="file-status">未选择照片</span>
+            </div>
             
+            <div class="file-upload">
+                <label for="csvLoader" class="input-field" style="cursor: pointer; width: auto;">上传特征点表格</label>
+                <input type="file" id="csvLoader" accept=".csv" style="display: none;">
+                <span id="csvStatus" class="file-status">未选择表格</span>
+            </div>
+
             <div class="zoom-controls">
                 <label>缩放: </label>
                 <input type="range" id="zoom" min="10" max="300" step="1" value="100" style="flex: 1;">
@@ -100,7 +119,7 @@
 
             <div class="input-group">
                 <input type="text" id="pointName" placeholder="特征点名称" class="input-field">
-                <input type="text" id="pointSymbol" placeholder="特征点符号 (如A1)" class="input-field">
+                <input type="text" id="pointSymbol" placeholder="特征点符号 (如199)" class="input-field">
                 
                 <input type="text" id="longitude" placeholder="经度" class="input-field">
                 <input type="text" id="latitude" placeholder="纬度" class="input-field">
@@ -108,11 +127,14 @@
                 <div class="coordinate-hint">单位为度，小数部分为5位，如199.39048</div>
             </div>
 
+            <button onclick="saveAnnotations()" class="input-field">保存标注</button>
             <button onclick="exportCSV()" class="input-field">导出CSV</button>
             <div class="point-list" id="pointList"></div>
+            <div class="image-list" id="imageList"></div>
         </div>
     </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
 <script>
 const canvas = document.getElementById('imageCanvas');
 const ctx = canvas.getContext('2d');
@@ -125,6 +147,9 @@ let offsetY = 0;
 let isDragging = false;
 let lastX = 0;
 let lastY = 0;
+let annotations = {}; // 存储所有图片的标注信息
+let currentImageName = ''; // 当前图片名称
+let featurePoints = {}; // 存储上传的特征点表格数据
 
 // 自动调整图像大小以适应画布
 function fitImageToCanvas() {
@@ -161,15 +186,38 @@ document.getElementById('imageLoader').onchange = function(e) {
     reader.onload = function(event) {
         image = new Image();
         image.onload = function() {
+            currentImageName = e.target.files[0].name;
+            points = annotations[currentImageName] || [];
             fitImageToCanvas();
+            updatePointList();
+            updateImageList();
+            document.getElementById('fileStatus').textContent = currentImageName;
         }
         image.src = event.target.result;
     }
     reader.readAsDataURL(e.target.files[0]);
 };
 
+// CSV文件加载
+document.getElementById('csvLoader').onchange = function(e) {
+    const file = e.target.files[0];
+    Papa.parse(file, {
+        header: true,
+        dynamicTyping: true,
+        complete: function(results) {
+            featurePoints = results.data.reduce((acc, row) => {
+                const key = `${row.Symbol}-${row.Name}`;
+                acc[key] = { longitude: row.Longitude, latitude: row.Latitude };
+                return acc;
+            }, {});
+            document.getElementById('csvStatus').textContent = file.name;
+        }
+    });
+};
+
 // 窗口大小改变时重新适应
 window.addEventListener('resize', fitImageToCanvas);
+
 // 缩放控制
 document.getElementById('zoom').oninput = function(e) {
     const value = parseInt(e.target.value);
@@ -188,6 +236,40 @@ document.getElementById('zoomValue').onchange = function(e) {
     this.value = value;
     redraw();
 };
+
+// 添加鼠标滚轮缩放功能
+canvas.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    const zoomFactor = 1.1;
+    const mousePos = {
+        x: e.clientX - canvas.getBoundingClientRect().left,
+        y: e.clientY - canvas.getBoundingClientRect().top
+    };
+
+    // 计算当前鼠标位置在缩放前的坐标
+    const prevMousePos = {
+        x: (mousePos.x - offsetX) / scale,
+        y: (mousePos.y - offsetY) / scale
+    };
+
+    if (e.deltaY < 0) {
+        // 缩小
+        scale = Math.min(scale * zoomFactor, 3);
+    } else {
+        // 放大
+        scale = Math.max(scale / zoomFactor, 0.1);
+    }
+
+    // 更新偏移量以使缩放以鼠标位置为中心
+    offsetX = mousePos.x - prevMousePos.x * scale;
+    offsetY = mousePos.y - prevMousePos.y * scale;
+
+    const zoomPercent = Math.round(scale * 100);
+    document.getElementById('zoom').value = zoomPercent;
+    document.getElementById('zoomValue').value = zoomPercent;
+
+    redraw();
+});
 
 // 坐标验证函数
 function validateCoordinate(value) {
@@ -226,7 +308,7 @@ canvas.onmousedown = function(e) {
         const y = (e.clientY - rect.top - offsetY) / scale;
         
         const name = document.getElementById('pointName').value || 'Point ' + (points.length + 1);
-        const symbol = document.getElementById('pointSymbol').value || 'A' + (points.length + 1);
+        const symbol = document.getElementById('pointSymbol').value || '199'; // 修改默认符号
         const longitude = document.getElementById('longitude').value;
         const latitude = document.getElementById('latitude').value;
         const elevation = document.getElementById('elevation').value;
@@ -333,6 +415,16 @@ function updatePointList() {
     `).join('');
 }
 
+// 更新已标注图片列表
+function updateImageList() {
+    const list = document.getElementById('imageList');
+    list.innerHTML = Object.keys(annotations).map(imageName => `
+        <div class="image-item">
+            ${imageName} (${annotations[imageName].length} 个特征点)
+        </div>
+    `).join('');
+}
+
 // 删除点
 function removePoint(index) {
     points.splice(index, 1);
@@ -340,17 +432,104 @@ function removePoint(index) {
     redraw();
 }
 
+// 保存标注信息
+function saveAnnotations() {
+    if (currentImageName) {
+        annotations[currentImageName] = points;
+        updateImageList();
+        alert('标注信息已保存');
+    }
+}
+
+// 获取高程数据的异步函数
+async function getElevation(latitude, longitude) {
+    const cacheKey = `${latitude},${longitude}`;
+    const cachedElevation = localStorage.getItem(cacheKey);
+    if (cachedElevation) {
+        return parseFloat(cachedElevation);
+    }
+
+    const response = await fetch(`https://maps.googleapis.com/maps/api/elevation/json?locations=${latitude},${longitude}&key=YOUR_GOOGLE_MAPS_API_KEY`);
+    const data = await response.json();
+    const elevation = data.results[0]?.elevation;
+    if (elevation !== undefined) {
+        localStorage.setItem(cacheKey, elevation);
+    }
+    return elevation;
+}
+// 使用Google Maps Elevation API获取高程
+async function getElevationFromAPI(longitude, latitude) {
+    const apiKey = 'YOUR_GOOGLE_MAPS_API_KEY'; // 替换为你的API密钥
+    const url = `https://maps.googleapis.com/maps/api/elevation/json?locations=${latitude},${longitude}&key=${apiKey}`;
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data.status === 'OK' && data.results.length > 0) {
+            return data.results[0].elevation;
+        } else {
+            console.error('Error fetching elevation data:', data);
+            return '';
+        }
+    } catch (error) {
+        console.error('Error fetching elevation data:', error);
+        return '';
+    }
+}
+
 // 导出CSV
-function exportCSV() {
-    const csvContent = "data:text/csv;charset=utf-8," 
-        + "ID,Name,Symbol,Pixel_x,Pixel_y,Longitude,Latitude,Elevation\n"
-        + points.map((point, index) => 
-            `${index + 1},${point.name},${point.symbol},${point.x},${point.y},${point.longitude || ''},${point.latitude || ''},${point.elevation || ''}`
-        ).join("\n");
-    
-    const encodedUri = encodeURI(csvContent);
+async function exportCSV() {
+    let csvContent = "\uFEFFOBJECTID,Symbol,Name"; // 使用BOM标记解决中文乱码问题
+
+    // 动态生成列名
+    const allImageNames = Object.keys(annotations);
+    allImageNames.forEach(imageName => {
+        csvContent += `,Pixel_x_${imageName},Pixel_y_${imageName}`;
+    });
+    csvContent += ",Longitude,Latitude,Elevation\n";
+
+    // 获取所有特征点的名称和符号
+    const allPoints = {};
+    allImageNames.forEach(imageName => {
+        const points = annotations[imageName];
+        points.forEach(point => {
+            const key = `${point.symbol}-${point.name}`;
+            if (!allPoints[key]) {
+                allPoints[key] = {};
+            }
+            allPoints[key][imageName] = point;
+        });
+    });
+
+    // 填充特征点信息
+    for (const [key, value] of Object.entries(allPoints)) {
+        const [symbol, name] = key.split('-');
+        let longitude = '';
+        let latitude = '';
+        let elevation = '';
+        csvContent += `${Object.keys(allPoints).indexOf(key) + 1},${symbol},${name}`;
+
+        for (const imageName of allImageNames) {
+            const point = value[imageName] || { x: '', y: '' };
+            csvContent += `,${point.x},${point.y}`;
+            if (point.longitude !== undefined && point.latitude !== undefined) {
+                longitude = point.longitude;
+                latitude = point.latitude;
+            }
+        }
+
+        // 如果经度和纬度存在，但高程为空，则通过API获取高程
+        if (longitude && latitude && !elevation) {
+            elevation = await getElevationFromAPI(longitude, latitude);
+        }
+
+        csvContent += `,${longitude},${latitude},${elevation}`;
+        csvContent += "\n";
+    }
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
     link.setAttribute("download", "feature_points.csv");
     document.body.appendChild(link);
     link.click();
