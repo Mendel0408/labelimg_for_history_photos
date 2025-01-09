@@ -128,6 +128,7 @@
             </div>
 
             <button onclick="saveAnnotations()" class="input-field">保存标注</button>
+            <button onclick="exportAnnotatedImage()" class="input-field">导出标注照片</button>
             <button onclick="exportCSV()" class="input-field">导出CSV</button>
             <div class="point-list" id="pointList"></div>
             <div class="image-list" id="imageList"></div>
@@ -135,391 +136,456 @@
     </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.0/xlsx.full.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
-    <script>
-    const canvas = document.getElementById('imageCanvas');
-    const ctx = canvas.getContext('2d');
-    const coordsDisplay = document.getElementById('coordinates');
-    let points = [];
-    let image = null;
-    let scale = 1;
-    let offsetX = 0;
-    let offsetY = 0;
-    let isDragging = false;
-    let lastX = 0;
-    let lastY = 0;
-    let annotations = {}; // 存储所有图片的标注信息
-    let currentImageName = ''; // 当前图片名称
-    let featurePoints = {}; // 存储上传的特征点表格数据
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+<script>
+const canvas = document.getElementById('imageCanvas');
+const ctx = canvas.getContext('2d');
+const coordsDisplay = document.getElementById('coordinates');
+let points = [];
+let image = null;
+let scale = 1;
+let offsetX = 0;
+let offsetY = 0;
+let isDragging = false;
+let lastX = 0;
+let lastY = 0;
+let annotations = {}; // 存储所有图片的标注信息
+let currentImageName = ''; // 当前图片名称
+let featurePoints = {}; // 存储上传的特征点表格数据
 
-    // 自动调整图像大小以适应画布
-    function fitImageToCanvas() {
-        if (!image) return;
-        
-        const container = canvas.parentElement;
-        const containerWidth = container.clientWidth;
-        const containerHeight = container.clientHeight;
-        
-        // 计算缩放比例
-        const scaleX = containerWidth / image.width;
-        const scaleY = containerHeight / image.height;
-        scale = Math.min(scaleX, scaleY, 1); // 取最小值，确保图像完全可见
-        
-        // 更新画布大小
-        canvas.width = containerWidth;
-        canvas.height = containerHeight;
-        
-        // 计算偏移量以使图像居中
-        offsetX = (containerWidth - image.width * scale) / 2;
-        offsetY = (containerHeight - image.height * scale) / 2;
-        
-        // 更新缩放控制器的值
-        const zoomPercent = Math.round(scale * 100);
-        document.getElementById('zoom').value = zoomPercent;
-        document.getElementById('zoomValue').value = zoomPercent;
-        
-        redraw();
-    }
+// 自动调整图像大小以适应画布
+function fitImageToCanvas() {
+    if (!image) return;
+    
+    const container = canvas.parentElement;
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
+    
+    // 计算缩放比例
+    const scaleX = containerWidth / image.width;
+    const scaleY = containerHeight / image.height;
+    scale = Math.min(scaleX, scaleY, 1); // 取最小值，确保图像完全可见
+    
+    // 更新画布大小
+    canvas.width = containerWidth;
+    canvas.height = containerHeight;
+    
+    // 计算偏移量以使图像居中
+    offsetX = (containerWidth - image.width * scale) / 2;
+    offsetY = (containerHeight - image.height * scale) / 2;
+    
+    // 更新缩放控制器的值
+    const zoomPercent = Math.round(scale * 100);
+    document.getElementById('zoom').value = zoomPercent;
+    document.getElementById('zoomValue').value = zoomPercent;
+    
+    redraw();
+}
 
-    // 图像加载
-    document.getElementById('imageLoader').onchange = function(e) {
-        const reader = new FileReader();
-        reader.onload = function(event) {
-            image = new Image();
-            image.onload = function() {
-                currentImageName = e.target.files[0].name;
-                points = annotations[currentImageName] || [];
-                fitImageToCanvas();
-                updatePointList();
-                updateImageList();
-                document.getElementById('fileStatus').textContent = currentImageName;
-            }
-            image.src = event.target.result;
+// 图像加载
+document.getElementById('imageLoader').onchange = function(e) {
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        image = new Image();
+        image.onload = function() {
+            currentImageName = e.target.files[0].name;
+            points = annotations[currentImageName] || [];
+            fitImageToCanvas();
+            updatePointList();
+            updateImageList();
+            document.getElementById('fileStatus').textContent = currentImageName;
         }
-        reader.readAsDataURL(e.target.files[0]);
-    };
+        image.src = event.target.result;
+    }
+    reader.readAsDataURL(e.target.files[0]);
+};
 
-    // CSV或XLSX文件加载
-    document.getElementById('csvLoader').onchange = function(e) {
-        const file = e.target.files[0];
-        const fileName = file.name;
-        const fileExtension = fileName.split('.').pop().toLowerCase();
+// CSV或XLSX文件加载
+document.getElementById('csvLoader').onchange = function(e) {
+    const file = e.target.files[0];
+    const fileName = file.name;
+    const fileExtension = fileName.split('.').pop().toLowerCase();
 
-        if (fileExtension === 'csv') {
-            Papa.parse(file, {
-                header: true,
-                dynamicTyping: true,
-                complete: function(results) {
-                    featurePoints = results.data.reduce((acc, row) => {
-                        const key = `${row.symbol}-${row.Name}`;
-                        acc[key] = { longitude: row.longitude, latitude: row.latitude, height: row.Height };
-                        return acc;
-                    }, {});
-                    document.getElementById('csvStatus').textContent = file.name;
-                }
-            });
-        } else if (fileExtension === 'xlsx') {
-            const reader = new FileReader();
-            reader.onload = function(event) {
-                const data = new Uint8Array(event.target.result);
-                const workbook = XLSX.read(data, { type: 'array' });
-                const sheetName = workbook.SheetNames[0];
-                const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
-                
-                // 解析数据
-                sheet.forEach((row, index) => {
-                    if (index === 0) return; // 跳过表头
-                    const [OBJECTID, symbol, Name, longitude, latitude, height] = row;
-                    const key = `${symbol}-${Name}`;
-                    featurePoints[key] = { longitude, latitude, height };
-                });
-                
+    if (fileExtension === 'csv') {
+        Papa.parse(file, {
+            header: true,
+            dynamicTyping: true,
+            complete: function(results) {
+                featurePoints = results.data.reduce((acc, row) => {
+                    const key = `${row.symbol}-${row.Name}`;
+                    acc[key] = { longitude: row.longitude, latitude: row.latitude, height: row.Height };
+                    return acc;
+                }, {});
                 document.getElementById('csvStatus').textContent = file.name;
-            };
-            reader.readAsArrayBuffer(file);
-        } else {
-            alert('Unsupported file format. Please upload a CSV or XLSX file.');
-        }
-    };
-
-    // 窗口大小改变时重新适应
-    window.addEventListener('resize', fitImageToCanvas);
-
-    // 缩放控制
-    document.getElementById('zoom').oninput = function(e) {
-        const value = parseInt(e.target.value);
-        scale = value / 100;
-        document.getElementById('zoomValue').value = value;
-        redraw();
-    };
-
-    // 手动输入缩放值
-    document.getElementById('zoomValue').onchange = function(e) {
-        let value = parseInt(e.target.value);
-        // 限制范围在10%到300%之间
-        value = Math.min(Math.max(value, 10), 300);
-        scale = value / 100;
-        document.getElementById('zoom').value = value;
-        this.value = value;
-        redraw();
-    };
-
-    // 添加鼠标滚轮缩放功能
-    canvas.addEventListener('wheel', function(e) {
-        e.preventDefault();
-        const zoomFactor = 1.1;
-        const mousePos = {
-            x: e.clientX - canvas.getBoundingClientRect().left,
-            y: e.clientY - canvas.getBoundingClientRect().top
-        };
-
-        // 计算当前鼠标位置在缩放前的坐标
-        const prevMousePos = {
-            x: (mousePos.x - offsetX) / scale,
-            y: (mousePos.y - offsetY) / scale
-        };
-
-        if (e.deltaY < 0) {
-            // 缩小
-            scale = Math.min(scale * zoomFactor, 3);
-        } else {
-            // 放大
-            scale = Math.max(scale / zoomFactor, 0.1);
-        }
-
-        // 更新偏移量以使缩放以鼠标位置为中心
-        offsetX = mousePos.x - prevMousePos.x * scale;
-        offsetY = mousePos.y - prevMousePos.y * scale;
-
-        const zoomPercent = Math.round(scale * 100);
-        document.getElementById('zoom').value = zoomPercent;
-        document.getElementById('zoomValue').value = zoomPercent;
-
-        redraw();
-    });
-
-    // 坐标验证函数
-    function validateCoordinate(value) {
-        if (!value) return true;
-        const regex = /^-?\d+(\.\d{0,5})?$/;
-        return regex.test(value);
-    }
-
-    // 坐标输入验证
-    ['longitude', 'latitude'].forEach(id => {
-        document.getElementById(id).addEventListener('input', function(e) {
-            if (!validateCoordinate(e.target.value)) {
-                e.target.style.backgroundColor = '#ffe6e6';
-            } else {
-                e.target.style.backgroundColor = '';
             }
         });
+    } else if (fileExtension === 'xlsx') {
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            const data = new Uint8Array(event.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheetName = workbook.SheetNames[0];
+            const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
+            
+            // 解析数据
+            sheet.forEach((row, index) => {
+                if (index === 0) return; // 跳过表头
+                const [OBJECTID, symbol, Name, longitude, latitude, height] = row;
+                const key = `${symbol}-${Name}`;
+                featurePoints[key] = { longitude, latitude, height };
+            });
+            
+            document.getElementById('csvStatus').textContent = file.name;
+        };
+        reader.readAsArrayBuffer(file);
+    } else {
+        alert('Unsupported file format. Please upload a CSV or XLSX file.');
+    }
+};
+
+// 窗口大小改变时重新适应
+window.addEventListener('resize', fitImageToCanvas);
+
+// 缩放控制
+document.getElementById('zoom').oninput = function(e) {
+    const value = parseInt(e.target.value);
+    scale = value / 100;
+    document.getElementById('zoomValue').value = value;
+    redraw();
+};
+
+// 手动输入缩放值
+document.getElementById('zoomValue').onchange = function(e) {
+    let value = parseInt(e.target.value);
+    // 限制范围在10%到300%之间
+    value = Math.min(Math.max(value, 10), 300);
+    scale = value / 100;
+    document.getElementById('zoom').value = value;
+    this.value = value;
+    redraw();
+};
+
+// 添加鼠标滚轮缩放功能
+canvas.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    const zoomFactor = 1.1;
+    const mousePos = {
+        x: e.clientX - canvas.getBoundingClientRect().left,
+        y: e.clientY - canvas.getBoundingClientRect().top
+    };
+
+    // 计算当前鼠标位置在缩放前的坐标
+    const prevMousePos = {
+        x: (mousePos.x - offsetX) / scale,
+        y: (mousePos.y - offsetY) / scale
+    };
+
+    if (e.deltaY < 0) {
+        // 缩小
+        scale = Math.min(scale * zoomFactor, 3);
+    } else {
+        // 放大
+        scale = Math.max(scale / zoomFactor, 0.1);
+    }
+
+    // 更新偏移量以使缩放以鼠标位置为中心
+    offsetX = mousePos.x - prevMousePos.x * scale;
+    offsetY = mousePos.y - prevMousePos.y * scale;
+
+    const zoomPercent = Math.round(scale * 100);
+    document.getElementById('zoom').value = zoomPercent;
+    document.getElementById('zoomValue').value = zoomPercent;
+
+    redraw();
+});
+
+// 坐标验证函数
+function validateCoordinate(value) {
+    if (!value) return true;
+    const regex = /^-?\d+(\.\d{0,5})?$/;
+    return regex.test(value);
+}
+
+// 坐标输入验证
+['longitude', 'latitude'].forEach(id => {
+    document.getElementById(id).addEventListener('input', function(e) {
+        if (!validateCoordinate(e.target.value)) {
+            e.target.style.backgroundColor = '#ffe6e6';
+        } else {
+            e.target.style.backgroundColor = '';
+        }
     });
+});
 
-    // 鼠标事件处理
-    let isRightMouseDown = false;
+// 鼠标事件处理
+let isRightMouseDown = false;
 
-    canvas.onmousedown = function(e) {
-        if (e.button === 2) { // 右键按下
-            isRightMouseDown = true;
-            lastX = e.clientX;
-            lastY = e.clientY;
-            canvas.style.cursor = 'grabbing'; // 改变鼠标样式为抓取状态
+canvas.onmousedown = function(e) {
+    if (e.button === 2) { // 右键按下
+        isRightMouseDown = true;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        canvas.style.cursor = 'grabbing'; // 改变鼠标样式为抓取状态
+        return;
+    }
+    
+    if (e.button === 0) { // 左键添加点
+        const rect = canvas.getBoundingClientRect();
+        // 考虑缩放和偏移计算实际坐标
+        const x = (e.clientX - rect.left - offsetX) / scale;
+        const y = (e.clientY - rect.top - offsetY) / scale;
+        
+        const name = document.getElementById('pointName').value || 'Point ' + (points.length + 1);
+        const symbol = document.getElementById('pointSymbol').value || '199'; // 修改默认符号
+        const longitude = document.getElementById('longitude').value;
+        const latitude = document.getElementById('latitude').value;
+        
+        // 验证坐标输入
+        if (longitude && !validateCoordinate(longitude) || 
+            latitude && !validateCoordinate(latitude)) {
+            alert('坐标格式错误！请确保输入正确的十进制度格式，小数点后5位');
             return;
         }
         
-        if (e.button === 0) { // 左键添加点
-            const rect = canvas.getBoundingClientRect();
-            // 考虑缩放和偏移计算实际坐标
-            const x = (e.clientX - rect.left - offsetX) / scale;
-            const y = (e.clientY - rect.top - offsetY) / scale;
-            
-            const name = document.getElementById('pointName').value || 'Point ' + (points.length + 1);
-            const symbol = document.getElementById('pointSymbol').value || '199'; // 修改默认符号
-            const longitude = document.getElementById('longitude').value;
-            const latitude = document.getElementById('latitude').value;
-            
-            // 验证坐标输入
-            if (longitude && !validateCoordinate(longitude) || 
-                latitude && !validateCoordinate(latitude)) {
-                alert('坐标格式错误！请确保输入正确的十进制度格式，小数点后5位');
-                return;
-            }
-            
-            points.push({
-                x: Math.round(x),
-                y: Math.round(y),
-                name: name,
-                symbol: symbol,
-                longitude: longitude,
-                latitude: latitude
-            });
-            
-            // 清空输入框
-            document.getElementById('pointName').value = '';
-            document.getElementById('pointSymbol').value = '';
-            document.getElementById('longitude').value = '';
-            document.getElementById('latitude').value = '';
-            
-            updatePointList();
-            redraw();
-        }
-    };
-
-canvas.onmousemove = function(e) {
-        const rect = canvas.getBoundingClientRect();
-        const x = Math.round((e.clientX - rect.left - offsetX) / scale);
-        const y = Math.round((e.clientX - rect.top - offsetY) / scale);
-        coordsDisplay.textContent = `X: ${x}, Y: ${y}`;
+        points.push({
+            x: Math.round(x),
+            y: Math.round(y),
+            name: name,
+            symbol: symbol,
+            longitude: longitude,
+            latitude: latitude
+        });
         
-        if (isRightMouseDown) {
-            offsetX += e.clientX - lastX;
-            offsetY += e.clientY - lastY;
-            lastX = e.clientX;
-            lastY = e.clientY;
-            redraw();
-        }
-    };
-
-    canvas.onmouseup = function(e) {
-        if (e.button === 2) { // 右键释放
-            isRightMouseDown = false;
-            canvas.style.cursor = 'crosshair'; // 恢复默认鼠标样式
-        }
-    };
-
-    canvas.onmouseleave = function() {
-        isRightMouseDown = false;
-        canvas.style.cursor = 'crosshair';
-    };
-
-    // 禁用右键菜单
-    canvas.oncontextmenu = function(e) {
-        e.preventDefault();
-    };
-
-    // 重绘画布
-    function redraw() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // 清空输入框
+        document.getElementById('pointName').value = '';
+        document.getElementById('pointSymbol').value = '';
+        document.getElementById('longitude').value = '';
+        document.getElementById('latitude').value = '';
         
-        if (image) {
-            ctx.save();
-            ctx.translate(offsetX, offsetY);
-            ctx.scale(scale, scale);
-            ctx.drawImage(image, 0, 0);
-            
-            // 绘制标记点
-            points.forEach((point, index) => {
-                ctx.beginPath();
-                ctx.arc(point.x, point.y, 3/scale, 0, 2 * Math.PI);
-                ctx.fillStyle = 'red';
-                ctx.fill();
-                
-                ctx.font = `${12/scale}px Arial`;
-                ctx.fillStyle = 'yellow';
-                ctx.fillText(point.symbol, point.x + 5/scale, point.y + 5/scale);
-            });
-            
-            ctx.restore();
-        }
-    }
-
-    // 更新点列表显示
-    function updatePointList() {
-        const list = document.getElementById('pointList');
-        list.innerHTML = points.map((point, index) => `
-            <div class="point-item" style="font-size: 12px;">
-                ${point.symbol} - ${point.name} (${point.x}, ${point.y})<br>
-                ${point.longitude ? '经度: ' + point.longitude + '° ' : ''}
-                ${point.latitude ? '纬度: ' + point.latitude + '° ' : ''}
-                <button onclick="removePoint(${index})">删除</button>
-            </div>
-        `).join('');
-    }
-
-    // 更新已标注图片列表
-    function updateImageList() {
-        const list = document.getElementById('imageList');
-        list.innerHTML = Object.keys(annotations).map(imageName => `
-            <div class="image-item" style="font-size: 12px;">
-                ${imageName} (${annotations[imageName].length} 个特征点)
-            </div>
-        `).join('');
-    }
-
-    // 删除点
-    function removePoint(index) {
-        points.splice(index, 1);
         updatePointList();
         redraw();
     }
+};
 
-    // 保存标注信息
-    function saveAnnotations() {
-        if (currentImageName) {
-            annotations[currentImageName] = points;
-            updateImageList();
-            alert('标注信息已保存');
-        }
+canvas.onmousemove = function(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.round((e.clientX - rect.left - offsetX) / scale);
+    const y = Math.round((e.clientX - rect.top - offsetY) / scale);
+    coordsDisplay.textContent = `X: ${x}, Y: ${y}`;
+    
+    if (isRightMouseDown) {
+        offsetX += e.clientX - lastX;
+        offsetY += e.clientY - lastY;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        redraw();
     }
+};
 
-    // 导出CSV
-    async function exportCSV() {
-        let csvContent = "\uFEFFOBJECTID,Symbol,Name,Height,Longitude,Latitude"; // 使用BOM标记解决中文乱码问题
+canvas.onmouseup = function(e) {
+    if (e.button === 2) { // 右键释放
+        isRightMouseDown = false;
+        canvas.style.cursor = 'crosshair'; // 恢复默认鼠标样式
+    }
+};
 
-        // 动态生成列名
-        const allImageNames = Object.keys(annotations);
-        allImageNames.forEach(imageName => {
-            csvContent += `,Pixel_x_${imageName},Pixel_y_${imageName}`;
+canvas.onmouseleave = function() {
+    isRightMouseDown = false;
+    canvas.style.cursor = 'crosshair';
+};
+
+// 禁用右键菜单
+canvas.oncontextmenu = function(e) {
+    e.preventDefault();
+};
+
+// 重绘画布
+function redraw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    if (image) {
+        ctx.save();
+        ctx.translate(offsetX, offsetY);
+        ctx.scale(scale, scale);
+        ctx.drawImage(image, 0, 0);
+        
+        // 绘制标记点
+        points.forEach((point, index) => {
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, 3/scale, 0, 2 * Math.PI);
+            ctx.fillStyle = 'red';
+            ctx.fill();
+            
+            ctx.font = `${12/scale}px Arial`;
+            ctx.fillStyle = 'yellow';
+            ctx.fillText(point.symbol, point.x + 5/scale, point.y + 5/scale);
         });
+        
+        ctx.restore();
+    }
+}
+
+// 更新点列表显示
+function updatePointList() {
+    const list = document.getElementById('pointList');
+    list.innerHTML = points.map((point, index) => `
+        <div class="point-item" style="font-size: 12px;">
+            ${point.symbol} - ${point.name} (${point.x}, ${point.y})<br>
+            ${point.longitude ? '经度: ' + point.longitude + '° ' : ''}
+            ${point.latitude ? '纬度: ' + point.latitude + '° ' : ''}
+            <button onclick="removePoint(${index})">删除</button>
+        </div>
+    `).join('');
+}
+
+// 更新已标注图片列表
+function updateImageList() {
+    const list = document.getElementById('imageList');
+    list.innerHTML = Object.keys(annotations).map(imageName => `
+        <div class="image-item" style="font-size: 12px;">
+            ${imageName} (${annotations[imageName].length} 个特征点）
+            <button onclick="removeAnnotation('${imageName}')">删除</button>
+        </div>
+    `).join('');
+}
+
+// 删除点
+function removePoint(index) {
+    points.splice(index, 1);
+    updatePointList();
+    redraw();
+}
+
+// 删除已保存的标注
+function removeAnnotation(imageName) {
+    delete annotations[imageName];
+    updateImageList();
+    if (currentImageName === imageName) {
+        points = [];
+        updatePointList();
+        redraw();
+    }
+}
+
+// 保存标注信息
+function saveAnnotations() {
+    if (currentImageName) {
+        annotations[currentImageName] = points;
+        updateImageList();
+        alert('标注信息已保存');
+    }
+}
+
+// 导出CSV
+async function exportCSV() {
+    let csvContent = "\uFEFFOBJECTID,Symbol,Name,Height,Longitude,Latitude"; // 使用BOM标记解决中文乱码问题
+
+    // 动态生成列名
+    const allImageNames = Object.keys(annotations);
+    allImageNames.forEach(imageName => {
+        csvContent += `,Pixel_x_${imageName},Pixel_y_${imageName}`;
+    });
+    csvContent += "\n";
+
+    // 获取所有特征点的名称和符号
+    const allPoints = {};
+    allImageNames.forEach(imageName => {
+        const points = annotations[imageName];
+        points.forEach(point => {
+            const key = `${point.symbol}-${point.name}`;
+            if (!allPoints[key]) {
+                allPoints[key] = {};
+            }
+            allPoints[key][imageName] = point;
+        });
+    });
+
+    // 填充特征点信息
+    for (const [key, value] of Object.entries(allPoints)) {
+        const [symbol, name] = key.split('-');
+        let longitude = '';
+        let latitude = '';
+        let height = '';
+
+        // 从featurePoints中获取经纬度和高度
+        if (featurePoints[key] !== undefined) {
+            longitude = featurePoints[key].longitude;
+            latitude = featurePoints[key].latitude;
+            height = featurePoints[key].height;
+        }
+
+        csvContent += `${Object.keys(allPoints).indexOf(key) + 1},${symbol},${name},${height},${longitude},${latitude}`;
+
+        for (const imageName of allImageNames) {
+            const point = value[imageName] || { x: '', y: '' };
+            csvContent += `,${point.x},${point.y}`;
+        }
+
         csvContent += "\n";
-
-        // 获取所有特征点的名称和符号
-        const allPoints = {};
-        allImageNames.forEach(imageName => {
-            const points = annotations[imageName];
-            points.forEach(point => {
-                const key = `${point.symbol}-${point.name}`;
-                if (!allPoints[key]) {
-                    allPoints[key] = {};
-                }
-                allPoints[key][imageName] = point;
-            });
-        });
-
-        // 填充特征点信息
-        for (const [key, value] of Object.entries(allPoints)) {
-            const [symbol, name] = key.split('-');
-            let longitude = '';
-            let latitude = '';
-            let height = '';
-
-            // 从featurePoints中获取经纬度和高度
-            if (featurePoints[key] !== undefined) {
-                longitude = featurePoints[key].longitude;
-                latitude = featurePoints[key].latitude;
-                height = featurePoints[key].height;
-            }
-
-            csvContent += `${Object.keys(allPoints).indexOf(key) + 1},${symbol},${name},${height},${longitude},${latitude}`;
-
-            for (const imageName of allImageNames) {
-                const point = value[imageName] || { x: '', y: '' };
-                csvContent += `,${point.x},${point.y}`;
-            }
-
-            csvContent += "\n";
-        }
-
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement("a");
-        const url = URL.createObjectURL(blob);
-        link.setAttribute("href", url);
-        link.setAttribute("download", "feature_points.csv");
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
     }
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", "feature_points.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+// 导出带有标注点的照片
+async function exportAnnotatedImage() {
+    if (!image) {
+        alert('请先上传历史照片');
+        return;
+    }
+
+    // 获取图像实际显示尺寸
+    const displayWidth = image.width;
+    const displayHeight = image.height;
+    const originalWidth = image.naturalWidth;
+    const originalHeight = image.naturalHeight;
+
+    // 计算缩放比例
+    const scaleX = originalWidth / displayWidth;
+    const scaleY = originalHeight / displayHeight;
+
+    // 创建一个新的Canvas
+    const tempCanvas = document.createElement('canvas');
+    const tempCtx = tempCanvas.getContext('2d');
+
+    // 设置Canvas尺寸与原始图像一致
+    tempCanvas.width = originalWidth;
+    tempCanvas.height = originalHeight;
+
+    // 按照原始尺寸绘制图像到新Canvas
+    tempCtx.drawImage(image, 0, 0, originalWidth, originalHeight);
+
+    // 绘制标注点
+    points.forEach((point) => {
+        tempCtx.beginPath();
+        // 使用原始尺寸绘制标注点，半径按比例调整
+        tempCtx.arc(point.x * scaleX, point.y * scaleY, 12 / scaleX, 0, 2 * Math.PI);
+        tempCtx.fillStyle = 'red';
+        tempCtx.fill();
+        
+        // 使用原始尺寸绘制标注字体，字体大小按比例调整
+        tempCtx.font = `${48 / scaleX}px Arial`;
+        tempCtx.fillStyle = 'yellow';
+        tempCtx.fillText(point.symbol, (point.x + 5) * scaleX, (point.y + 5) * scaleY);
+    });
+
+    // 导出Canvas为JPEG图片
+    const dataURL = tempCanvas.toDataURL('image/jpeg');
+    const link = document.createElement('a');
+    link.href = dataURL;
+    link.download = 'annotated_image.jpg';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
     </script>
 </body>
 </html>
