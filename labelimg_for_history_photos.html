@@ -65,6 +65,7 @@
             margin: 5px;
             background: #f9f9f9;
             border-radius: 4px;
+            font-size: 12px; /* 调整字体大小，缩小两个字号 */
         }
         .coordinates {
             position: fixed;
@@ -133,7 +134,7 @@
         </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.0/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.0/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
     <script>
     const canvas = document.getElementById('imageCanvas');
@@ -211,7 +212,7 @@
                 complete: function(results) {
                     featurePoints = results.data.reduce((acc, row) => {
                         const key = `${row.symbol}-${row.Name}`;
-                        acc[key] = { longitude: row.longitude, latitude: row.latitude };
+                        acc[key] = { longitude: row.longitude, latitude: row.latitude, height: row.Height };
                         return acc;
                     }, {});
                     document.getElementById('csvStatus').textContent = file.name;
@@ -228,9 +229,9 @@
                 // 解析数据
                 sheet.forEach((row, index) => {
                     if (index === 0) return; // 跳过表头
-                    const [OBJECTID, symbol, Name, longitude, latitude] = row;
+                    const [OBJECTID, symbol, Name, longitude, latitude, height] = row;
                     const key = `${symbol}-${Name}`;
-                    featurePoints[key] = { longitude, latitude };
+                    featurePoints[key] = { longitude, latitude, height };
                 });
                 
                 document.getElementById('csvStatus').textContent = file.name;
@@ -365,7 +366,7 @@
         }
     };
 
-    canvas.onmousemove = function(e) {
+canvas.onmousemove = function(e) {
         const rect = canvas.getBoundingClientRect();
         const x = Math.round((e.clientX - rect.left - offsetX) / scale);
         const y = Math.round((e.clientX - rect.top - offsetY) / scale);
@@ -427,7 +428,7 @@
     function updatePointList() {
         const list = document.getElementById('pointList');
         list.innerHTML = points.map((point, index) => `
-            <div class="point-item">
+            <div class="point-item" style="font-size: 12px;">
                 ${point.symbol} - ${point.name} (${point.x}, ${point.y})<br>
                 ${point.longitude ? '经度: ' + point.longitude + '° ' : ''}
                 ${point.latitude ? '纬度: ' + point.latitude + '° ' : ''}
@@ -440,7 +441,7 @@
     function updateImageList() {
         const list = document.getElementById('imageList');
         list.innerHTML = Object.keys(annotations).map(imageName => `
-            <div class="image-item">
+            <div class="image-item" style="font-size: 12px;">
                 ${imageName} (${annotations[imageName].length} 个特征点)
             </div>
         `).join('');
@@ -462,85 +463,63 @@
         }
     }
 
-// CSV文件加载
-document.getElementById('csvLoader').onchange = function(e) {
-    const file = e.target.files[0];
-    const reader = new FileReader();
-    reader.onload = function(event) {
-        const data = new Uint8Array(event.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
+    // 导出CSV
+    async function exportCSV() {
+        let csvContent = "\uFEFFOBJECTID,Symbol,Name,Height,Longitude,Latitude"; // 使用BOM标记解决中文乱码问题
 
-        // 假设数据在第一个工作表中
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-
-        // 解析数据，假设第一行是标题
-        featurePoints = json.slice(1).reduce((acc, row) => {
-            const key = `${row[1]}-${row[2]}`; // Symbol-Name
-            acc[key] = { longitude: row[3], latitude: row[4] };
-            return acc;
-        }, {});
-        document.getElementById('csvStatus').textContent = file.name;
-    };
-    reader.readAsArrayBuffer(file);
-};
-
-// 导出CSV
-async function exportCSV() {
-    let csvContent = "\uFEFFOBJECTID,Symbol,Name,Longitude,Latitude"; // 使用BOM标记解决中文乱码问题
-
-    // 动态生成列名
-    const allImageNames = Object.keys(annotations);
-    allImageNames.forEach(imageName => {
-        csvContent += `,Pixel_x_${imageName},Pixel_y_${imageName}`;
-    });
-    csvContent += "\n";
-
-    // 获取所有特征点的名称和符号
-    const allPoints = {};
-    allImageNames.forEach(imageName => {
-        const points = annotations[imageName];
-        points.forEach(point => {
-            const key = `${point.symbol}-${point.name}`;
-            if (!allPoints[key]) {
-                allPoints[key] = {};
-            }
-            allPoints[key][imageName] = point;
+        // 动态生成列名
+        const allImageNames = Object.keys(annotations);
+        allImageNames.forEach(imageName => {
+            csvContent += `,Pixel_x_${imageName},Pixel_y_${imageName}`;
         });
-    });
-
-    // 填充特征点信息
-    for (const [key, value] of Object.entries(allPoints)) {
-        const [symbol, name] = key.split('-');
-        let longitude = '';
-        let latitude = '';
-
-        // 从featurePoints中获取经纬度
-        if (featurePoints[key] !== undefined) {
-            longitude = featurePoints[key].longitude;
-            latitude = featurePoints[key].latitude;
-        }
-
-        csvContent += `${Object.keys(allPoints).indexOf(key) + 1},${symbol},${name},${longitude},${latitude}`;
-
-        for (const imageName of allImageNames) {
-            const point = value[imageName] || { x: '', y: '' };
-            csvContent += `,${point.x},${point.y}`;
-        }
-
         csvContent += "\n";
-    }
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", "feature_points.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-}
-</script>
+        // 获取所有特征点的名称和符号
+        const allPoints = {};
+        allImageNames.forEach(imageName => {
+            const points = annotations[imageName];
+            points.forEach(point => {
+                const key = `${point.symbol}-${point.name}`;
+                if (!allPoints[key]) {
+                    allPoints[key] = {};
+                }
+                allPoints[key][imageName] = point;
+            });
+        });
+
+        // 填充特征点信息
+        for (const [key, value] of Object.entries(allPoints)) {
+            const [symbol, name] = key.split('-');
+            let longitude = '';
+            let latitude = '';
+            let height = '';
+
+            // 从featurePoints中获取经纬度和高度
+            if (featurePoints[key] !== undefined) {
+                longitude = featurePoints[key].longitude;
+                latitude = featurePoints[key].latitude;
+                height = featurePoints[key].height;
+            }
+
+            csvContent += `${Object.keys(allPoints).indexOf(key) + 1},${symbol},${name},${height},${longitude},${latitude}`;
+
+            for (const imageName of allImageNames) {
+                const point = value[imageName] || { x: '', y: '' };
+                csvContent += `,${point.x},${point.y}`;
+            }
+
+            csvContent += "\n";
+        }
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", "feature_points.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+    </script>
 </body>
 </html>
