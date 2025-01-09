@@ -541,42 +541,55 @@ async function exportAnnotatedImage() {
         return;
     }
 
-    // 获取图像实际显示尺寸
-    const displayWidth = image.width;
-    const displayHeight = image.height;
-    const originalWidth = image.naturalWidth;
-    const originalHeight = image.naturalHeight;
+    // A4页面尺寸（在300 DPI下的像素值）
+    const A4Width = 2480;  // 210mm * (300 / 25.4)
+    const A4Height = 3508; // 297mm * (300 / 25.4)
 
-    // 计算缩放比例
-    const scaleX = originalWidth / displayWidth;
-    const scaleY = originalHeight / displayHeight;
+    // 设置标注点和字体的物理尺寸（单位：像素）
+    const pointRadius = 0.6 * 300 / 25.4;  // 0.6mm 转换为像素
+    const fontSize = 18 * 1.333;  // 14pt 转换为像素
 
-    // 创建一个新的Canvas
+    // 计算图像的缩放比例，使图像适应A4页面的尺寸
+    const imgAspectRatio = image.naturalWidth / image.naturalHeight;
+    let imgWidth = A4Width;
+    let imgHeight = A4Width / imgAspectRatio;
+
+    // 如果图像的高度超出了A4纸的高度，则按高度缩放
+    if (imgHeight > A4Height) {
+        imgHeight = A4Height;
+        imgWidth = A4Height * imgAspectRatio;
+    }
+
+    // 创建一个新的Canvas用于绘制图像和标注点
     const tempCanvas = document.createElement('canvas');
     const tempCtx = tempCanvas.getContext('2d');
 
-    // 设置Canvas尺寸与原始图像一致
-    tempCanvas.width = originalWidth;
-    tempCanvas.height = originalHeight;
+    // 设置Canvas尺寸为图像的缩放尺寸
+    tempCanvas.width = imgWidth;
+    tempCanvas.height = imgHeight;
 
-    // 按照原始尺寸绘制图像到新Canvas
-    tempCtx.drawImage(image, 0, 0, originalWidth, originalHeight);
+    // 将图像绘制到Canvas上
+    tempCtx.drawImage(image, 0, 0, imgWidth, imgHeight);
 
-    // 绘制标注点
+    // 绘制标注点和字体
     points.forEach((point) => {
+        // 计算标注点的屏幕坐标，缩放为当前图像的坐标系
+        const x = point.x * imgWidth / image.naturalWidth;
+        const y = point.y * imgHeight / image.naturalHeight;
+
+        // 绘制标注点
         tempCtx.beginPath();
-        // 使用原始尺寸绘制标注点，半径按比例调整
-        tempCtx.arc(point.x * scaleX, point.y * scaleY, 12 / scaleX, 0, 2 * Math.PI);
+        tempCtx.arc(x, y, pointRadius, 0, 2 * Math.PI);
         tempCtx.fillStyle = 'red';
         tempCtx.fill();
-        
-        // 使用原始尺寸绘制标注字体，字体大小按比例调整
-        tempCtx.font = `${48 / scaleX}px Arial`;
+
+        // 绘制标注的文本
+        tempCtx.font = `${fontSize}px Arial`;
         tempCtx.fillStyle = 'yellow';
-        tempCtx.fillText(point.symbol, (point.x + 5) * scaleX, (point.y + 5) * scaleY);
+        tempCtx.fillText(point.symbol, x + 12, y + 5);
     });
 
-    // 导出Canvas为JPEG图片
+    // 导出带标注的图像为JPEG格式
     const dataURL = tempCanvas.toDataURL('image/jpeg');
     const link = document.createElement('a');
     link.href = dataURL;
