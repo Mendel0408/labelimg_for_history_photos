@@ -478,17 +478,25 @@ function saveAnnotations() {
 
 // 导出CSV
 async function exportCSV() {
-    let csvContent = "\uFEFFOBJECTID,Symbol,Name,Height,Longitude,Latitude"; // 使用BOM标记解决中文乱码问题
+    // 读取特征点表格（CSV格式），保留原始内容
+    let csvContent = "\uFEFF"; // 使用BOM标记解决中文乱码问题
 
-    // 动态生成列名
+    // 获取原始表格的列名（假设featurePoints对象为原始上传的特征点数据）
+    const originalColumns = Object.keys(featurePoints[Object.keys(featurePoints)[0]]); // 获取原始表格的列名
+    csvContent += originalColumns.join(',') + ',';  // 追加原始列
+
+    // 获取所有图片名称
     const allImageNames = Object.keys(annotations);
+
+    // 动态生成新增列名：每个图片的标注点的像素坐标
     allImageNames.forEach(imageName => {
-        csvContent += `,Pixel_x_${imageName},Pixel_y_${imageName}`;
+        csvContent += `Pixel_x_${imageName},Pixel_y_${imageName},`;
     });
     csvContent += "\n";
 
-    // 获取所有特征点的名称和符号
-    const allPoints = {};
+    // 填充数据
+    const allPoints = {}; // 用于存储每个特征点的标注数据
+
     allImageNames.forEach(imageName => {
         const points = annotations[imageName];
         points.forEach(point => {
@@ -500,35 +508,38 @@ async function exportCSV() {
         });
     });
 
-    // 填充特征点信息
+    // 遍历所有特征点，将数据填入CSV中
     for (const [key, value] of Object.entries(allPoints)) {
         const [symbol, name] = key.split('-');
         let longitude = '';
         let latitude = '';
         let height = '';
 
-        // 从featurePoints中获取经纬度和高度
+        // 从 featurePoints 中获取经纬度和高度（保留原始表格中的这些列）
         if (featurePoints[key] !== undefined) {
-            longitude = featurePoints[key].longitude;
-            latitude = featurePoints[key].latitude;
-            height = featurePoints[key].height;
+            longitude = featurePoints[key].longitude || '';
+            latitude = featurePoints[key].latitude || '';
+            height = featurePoints[key].height || '';
         }
 
-        csvContent += `${Object.keys(allPoints).indexOf(key) + 1},${symbol},${name},${height},${longitude},${latitude}`;
+        // 填写原始数据（symbol、name、height、longitude、latitude）
+        csvContent += `${symbol},${name},${height},${longitude},${latitude},`;
 
+        // 填入每张图片的标注像素坐标（如果有标注）
         for (const imageName of allImageNames) {
             const point = value[imageName] || { x: '', y: '' };
-            csvContent += `,${point.x},${point.y}`;
+            csvContent += `${point.x},${point.y},`;
         }
 
         csvContent += "\n";
     }
 
+    // 生成并下载CSV文件
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     link.setAttribute("href", url);
-    link.setAttribute("download", "feature_points.csv");
+    link.setAttribute("download", "feature_points_with_annotations.csv");
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
