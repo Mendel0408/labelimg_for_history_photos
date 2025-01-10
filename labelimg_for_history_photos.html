@@ -119,8 +119,9 @@
             </div>
 
             <div class="input-group">
-                <input type="text" id="pointName" placeholder="特征点名称" class="input-field">
-                <input type="text" id="pointSymbol" placeholder="特征点符号 (如199)" class="input-field">
+	<input type="text" id="pointSymbol" placeholder="特征点符号 (如199)" class="input-field">
+	<input type="text" id="pointName" placeholder="特征点名称" class="input-field">
+
                 
                 <input type="text" id="longitude" placeholder="经度" class="input-field">
                 <input type="text" id="latitude" placeholder="纬度" class="input-field">
@@ -206,16 +207,22 @@ document.getElementById('csvLoader').onchange = function(e) {
     const fileName = file.name;
     const fileExtension = fileName.split('.').pop().toLowerCase();
 
+    console.log(`Loading file: ${fileName}`);
+
     if (fileExtension === 'csv') {
         Papa.parse(file, {
             header: true,
             dynamicTyping: true,
             complete: function(results) {
+                console.log('CSV parse complete:', results.data);
                 featurePoints = results.data.reduce((acc, row) => {
-                    const key = `${row.symbol}-${row.Name}`;
-                    acc[key] = { longitude: row.longitude, latitude: row.latitude, height: row.Height };
+                    if (row.Symbol && row.Name) { // 检查是否有有效的数据行
+                        const key = `${row.Symbol}-${row.Name}`;
+                        acc[key] = { objectID: row.OBJECTID, longitude: row.Longitude, latitude: row.Latitude, height: row.Height };
+                    }
                     return acc;
                 }, {});
+                console.log('Feature points:', featurePoints);
                 document.getElementById('csvStatus').textContent = file.name;
             }
         });
@@ -227,14 +234,19 @@ document.getElementById('csvLoader').onchange = function(e) {
             const sheetName = workbook.SheetNames[0];
             const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
             
+            console.log('XLSX parse complete:', sheet);
+
             // 解析数据
             sheet.forEach((row, index) => {
                 if (index === 0) return; // 跳过表头
-                const [OBJECTID, symbol, Name, longitude, latitude, height] = row;
-                const key = `${symbol}-${Name}`;
-                featurePoints[key] = { longitude, latitude, height };
+                const [OBJECTID, Symbol, Name, Longitude, Latitude, Height] = row;
+                if (Symbol && Name) { // 检查是否有有效的数据行
+                    const key = `${Symbol}-${Name}`;
+                    featurePoints[key] = { objectID: OBJECTID, longitude: Longitude, latitude: Latitude, height: Height };
+                }
             });
-            
+
+            console.log('Feature points:', featurePoints);
             document.getElementById('csvStatus').textContent = file.name;
         };
         reader.readAsArrayBuffer(file);
@@ -478,15 +490,18 @@ function saveAnnotations() {
 
 // 导出CSV
 async function exportCSV() {
+    console.log('Starting exportCSV...');
+
     // 读取特征点表格（CSV格式），保留原始内容
     let csvContent = "\uFEFF"; // 使用BOM标记解决中文乱码问题
 
-    // 获取原始表格的列名（假设featurePoints对象为原始上传的特征点数据）
-    const originalColumns = Object.keys(featurePoints[Object.keys(featurePoints)[0]]); // 获取原始表格的列名
+    // 获取原始表格的列名（确保与原始表格列名一致）
+    const originalColumns = ["OBJECTID", "Symbol", "Name", "Height", "Longitude", "Latitude"];
     csvContent += originalColumns.join(',') + ',';  // 追加原始列
 
     // 获取所有图片名称
     const allImageNames = Object.keys(annotations);
+    console.log('All image names:', allImageNames);
 
     // 动态生成新增列名：每个图片的标注点的像素坐标
     allImageNames.forEach(imageName => {
@@ -508,31 +523,32 @@ async function exportCSV() {
         });
     });
 
-    // 遍历所有特征点，将数据填入CSV中
-    for (const [key, value] of Object.entries(allPoints)) {
-        const [symbol, name] = key.split('-');
-        let longitude = '';
-        let latitude = '';
-        let height = '';
+    console.log('All points:', allPoints);
 
-        // 从 featurePoints 中获取经纬度和高度（保留原始表格中的这些列）
-        if (featurePoints[key] !== undefined) {
-            longitude = featurePoints[key].longitude || '';
-            latitude = featurePoints[key].latitude || '';
-            height = featurePoints[key].height || '';
+    // 遍历featurePoints，将数据填入CSV中
+    for (const [key, fp] of Object.entries(featurePoints)) {
+        if (!fp) {
+            continue; // 忽略无效的数据行
         }
+        const [symbol, name] = key.split('-');
+        const objectID = fp.objectID || '';
+        const longitude = fp.longitude || '';
+        const latitude = fp.latitude || '';
+        const height = fp.height || '';
 
-        // 填写原始数据（symbol、name、height、longitude、latitude）
-        csvContent += `${symbol},${name},${height},${longitude},${latitude},`;
+        // 填写原始数据（objectID, symbol、name、height、longitude、latitude）
+        csvContent += `${objectID},${symbol},${name},${height},${longitude},${latitude},`;
 
-        // 填入每张图片的标注像素坐标（如果有标注）
+        // 填入每张图片的标注像素坐标（如果有标注，否则用0代替）
         for (const imageName of allImageNames) {
-            const point = value[imageName] || { x: '', y: '' };
+            const point = allPoints[key] && allPoints[key][imageName] ? allPoints[key][imageName] : { x: 0, y: 0 };
             csvContent += `${point.x},${point.y},`;
         }
 
         csvContent += "\n";
     }
+
+    console.log('CSV content:', csvContent);
 
     // 生成并下载CSV文件
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -543,6 +559,8 @@ async function exportCSV() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+
+    console.log('exportCSV complete');
 }
 
 // 导出带有标注点的照片
