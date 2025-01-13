@@ -106,7 +106,7 @@
             </div>
             
             <div class="file-upload">
-                <label for="csvLoader" class="input-field" style="cursor: pointer; width: auto;">上传特征点表格</label>
+                <label for="csvLoader" class="input-field" style="cursor: pointer; width: auto;">上传已知坐标</label>
                 <input type="file" id="csvLoader" accept=".csv,.xlsx" style="display: none;">
                 <span id="csvStatus" class="file-status">未选择表格</span>
             </div>
@@ -152,7 +152,7 @@ let lastX = 0;
 let lastY = 0;
 let annotations = {}; // 存储所有图片的标注信息
 let currentImageName = ''; // 当前图片名称
-let featurePoints = {}; // 存储上传的特征点表格数据
+let featurePoints = {}; // 存储上传的坐标数据
 
 // 自动调整图像大小以适应画布
 function fitImageToCanvas() {
