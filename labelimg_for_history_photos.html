@@ -65,7 +65,7 @@
             margin: 5px;
             background: #f9f9f9;
             border-radius: 4px;
-            font-size: 12px; /* 调整字体大小，缩小两个字号 */
+            font-size: 12px; 
         }
         .coordinates {
             position: fixed;
@@ -89,6 +89,10 @@
         .file-status {
             font-size: 0.9em;
             color: #666;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 150px; /* 根据需要调整最大宽度 */
         }
     </style>
 </head>
@@ -218,7 +222,7 @@ document.getElementById('csvLoader').onchange = function(e) {
                 featurePoints = results.data.reduce((acc, row) => {
                     if (row.Symbol && row.Name) { // 检查是否有有效的数据行
                         const key = `${row.Symbol}-${row.Name}`;
-                        acc[key] = { objectID: row.OBJECTID, longitude: row.Longitude, latitude: row.Latitude, height: row.Height };
+                        acc[key] = { Objectid: row.Objectid, height: row.Height, longitude: row.Longitude, latitude: row.Latitude, elevation: row.Elevation  };
                     }
                     return acc;
                 }, {});
@@ -239,10 +243,10 @@ document.getElementById('csvLoader').onchange = function(e) {
             // 解析数据
             sheet.forEach((row, index) => {
                 if (index === 0) return; // 跳过表头
-                const [OBJECTID, Symbol, Name, Longitude, Latitude, Height] = row;
+                const [Objectid, Symbol, Name, Longitude, Latitude, Height] = row;
                 if (Symbol && Name) { // 检查是否有有效的数据行
                     const key = `${Symbol}-${Name}`;
-                    featurePoints[key] = { objectID: OBJECTID, longitude: Longitude, latitude: Latitude, height: Height };
+                    featurePoints[key] = { Objectid: Objectid, height: Height, longitude: Longitude, latitude: Latitude, elevation: Elevation };
                 }
             });
 
@@ -441,11 +445,13 @@ function redraw() {
 function updatePointList() {
     const list = document.getElementById('pointList');
     list.innerHTML = points.map((point, index) => `
-        <div class="point-item" style="font-size: 12px;">
-            ${point.symbol} - ${point.name} (${point.x}, ${point.y})<br>
-            ${point.longitude ? '经度: ' + point.longitude + '° ' : ''}
-            ${point.latitude ? '纬度: ' + point.latitude + '° ' : ''}
-            <button onclick="removePoint(${index})">删除</button>
+        <div class="point-item" style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                ${point.symbol} - ${point.name} (${point.x}, ${point.y})<br>
+                ${point.longitude ? '经度: ' + point.longitude + '° ' : ''}
+                ${point.latitude ? '纬度: ' + point.latitude + '° ' : ''}
+            </div>
+            <button onclick="removePoint(${index})" style="margin-left: 10px;">删除</button>
         </div>
     `).join('');
 }
@@ -454,9 +460,11 @@ function updatePointList() {
 function updateImageList() {
     const list = document.getElementById('imageList');
     list.innerHTML = Object.keys(annotations).map(imageName => `
-        <div class="image-item" style="font-size: 12px;">
-            ${imageName} (${annotations[imageName].length} 个特征点）
-            <button onclick="removeAnnotation('${imageName}')">删除</button>
+        <div class="image-item" style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                ${imageName} (${annotations[imageName].length} 个特征点）
+            </div>
+            <button onclick="removeAnnotation('${imageName}')" style="margin-left: 10px;">删除</button>
         </div>
     `).join('');
 }
@@ -496,7 +504,7 @@ async function exportCSV() {
     let csvContent = "\uFEFF"; // 使用BOM标记解决中文乱码问题
 
     // 获取原始表格的列名（确保与原始表格列名一致）
-    const originalColumns = ["OBJECTID", "Symbol", "Name", "Height", "Longitude", "Latitude"];
+    const originalColumns = ["Objectid", "Symbol", "Name", "Height", "Longitude", "Latitude", "Elevation" ];
     csvContent += originalColumns.join(',') + ',';  // 追加原始列
 
     // 获取所有图片名称
@@ -531,13 +539,15 @@ async function exportCSV() {
             continue; // 忽略无效的数据行
         }
         const [symbol, name] = key.split('-');
-        const objectID = fp.objectID || '';
+        const Objectid = fp.Objectid || '';
+        const height = fp.height || '';
         const longitude = fp.longitude || '';
         const latitude = fp.latitude || '';
-        const height = fp.height || '';
+        const elevation = fp.elevation || '';
 
-        // 填写原始数据（objectID, symbol、name、height、longitude、latitude）
-        csvContent += `${objectID},${symbol},${name},${height},${longitude},${latitude},`;
+
+        // 填写原始数据（Objectid, symbol、name、height、longitude、latitude、elevation）
+        csvContent += `${Objectid},${symbol},${name},${height},${longitude},${latitude},${elevation},`;
 
         // 填入每张图片的标注像素坐标（如果有标注，否则用0代替）
         for (const imageName of allImageNames) {
